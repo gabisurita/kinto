@@ -38,6 +38,7 @@ class Collection(resource.ShareableResource):
     permissions = ('read', 'write', 'record:create')
 
     def get_parent_id(self, request):
+        print(request.matchdict)
         bucket_id = request.matchdict['bucket_id']
         parent_id = utils.instance_uri(request, 'bucket', id=bucket_id)
         return parent_id

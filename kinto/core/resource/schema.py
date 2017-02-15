@@ -1,11 +1,14 @@
 from __future__ import division
+import pydoc
 import warnings
+import re
 
 import colander
 
 from kinto.core.schema import (Any, HeaderField, QueryField, HeaderQuotedInteger,
                                FieldList, TimeStamp, URL)
 from kinto.core.utils import native_value
+from kinto.core.storage import StorageBase
 
 POSTGRESQL_MAX_INTEGER_VALUE = 2**64 // 2
 
@@ -304,6 +307,57 @@ class RequestSchema(colander.MappingSchema):
     """Base schema for kinto requests."""
 
     @colander.deferred
+    def path(node, kwargs):
+        def build_path(node, kwargs):
+            """Build a path request schema from a cornice path and resource_id
+            generators."""
+            path = kwargs.get('path')
+            # If not defined, keep deferred
+            if not path:
+                return
+
+            # Try to replace {id} with the current resource id
+            current_resource_id = kwargs.get('resource_name')
+            if current_resource_id:
+                path = path.replace('{id}', '{{{}_id}}'.format(current_resource_id))
+
+            # Match all ids and remove brackets
+            resource_ids = [name[1:-1] for name in re.findall('\{.*?\}', path)]
+
+            # Get id generators
+            id_generators = kwargs.get('id_generators', [])
+
+            path_schema = colander.MappingSchema(name='path')
+
+            # build a path request schema node for each resource
+            for rid in resource_ids:
+                # try to get a config setted id_generator for the resource
+                try:
+                    resource_id_gen = id_generators.get('{}_generator'.format(rid))
+                    default_id_gen = id_generators.get('id_generator')
+                    id_gen = resource_id_gen or default_id_gen
+                    id_gen = pydoc.locate(id_gen)
+                    regexp = id_gen.regexp
+
+                # Get the basic storage generator
+                except AttributeError:
+                    regexp = StorageBase.id_generator.regexp
+
+                # Reset the current resource id
+                if rid == current_resource_id + '_id':
+                    rid = 'id'
+
+                # Build the corresponding validator and SchemaNode
+                validator = colander.Regex(regexp, msg="")
+                path_schema[rid] = colander.SchemaNode(colander.String(),
+                                                       validator=validator)
+
+            return path_schema
+
+        # Set if node is provided, else keep deferred (allow bindind later)
+        return build_path(node, kwargs) or colander.deferred(build_path)
+
+    @colander.deferred
     def header(node, kwargs):
         return kwargs.get('header')
 
@@ -317,6 +371,12 @@ class RequestSchema(colander.MappingSchema):
             self['header'] = HeaderSchema()
         if not self.get('querystring'):
             self['querystring'] = QuerySchema()
+
+    def deserialize(self, cstruct=colander.null):
+        print(cstruct)
+        deserialized = super().deserialize(cstruct)
+        print(deserialized)
+        return deserialized
 
 
 class PayloadRequestSchema(RequestSchema):

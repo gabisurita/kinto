@@ -62,7 +62,6 @@ def register_resource(resource_cls, settings=None, viewset=None, depth=1,
         viewset = resource_cls.default_viewset(**kwargs)
     else:
         viewset.update(**kwargs)
-
     resource_name = viewset.get_name(resource_cls)
 
     def register_service(endpoint_type, settings):
@@ -86,6 +85,10 @@ def register_resource(resource_cls, settings=None, viewset=None, depth=1,
         service.record_path = (viewset.record_path.format(**path_values)
                                if viewset.record_path is not None else None)
 
+        # Get the resource id generators on settings
+        id_generators = {name: value for name, value in settings.items()
+                         if name.endswith("id_generator")}
+
         methods = getattr(viewset, '%s_methods' % endpoint_type)
         for method in methods:
             if not viewset.is_endpoint_enabled(
@@ -94,6 +97,13 @@ def register_resource(resource_cls, settings=None, viewset=None, depth=1,
 
             argument_getter = getattr(viewset, '%s_arguments' % endpoint_type)
             view_args = argument_getter(resource_cls, method)
+
+            # If view has a schema, bind the resource id generator for validation
+            # XXX: This can't be bound at viewset because we must have the instance
+            # settings available.
+            view_args['schema'] = view_args['schema'].bind(path=path,
+                                                           resource_name=resource_name,
+                                                           id_generators=id_generators)
 
             view = viewset.get_view(endpoint_type, method.lower())
             service.add_view(method, view, klass=resource_cls, **view_args)
@@ -150,23 +160,6 @@ class UserResource(object):
 
     def __init__(self, request, context=None):
         # Models are isolated by user.
-        parent_id = self.get_parent_id(request)
-
-        # Authentication to storage is transmitted as is (cf. cloud_storage).
-        auth = request.headers.get('Authorization')
-
-        # ID generator by resource name in settings.
-        default_id_generator = request.registry.id_generators['']
-        resource_name = context.resource_name if context else ''
-        id_generator = request.registry.id_generators.get(resource_name,
-                                                          default_id_generator)
-
-        self.model = self.default_model(
-            storage=request.registry.storage,
-            id_generator=id_generator,
-            collection_id=classname(self),
-            parent_id=parent_id,
-            auth=auth)
 
         self.request = request
         self.context = context
@@ -202,6 +195,25 @@ class UserResource(object):
             raise http_error(HTTPServiceUnavailable(),
                              errno=ERRORS.BACKEND,
                              message=error_msg)
+
+    @reify
+    def model(self):
+        parent_id = self.get_parent_id(self.request)
+
+        # Authentication to storage is transmitted as is (cf. cloud_storage).
+        auth = self.request.headers.get('Authorization')
+
+        # ID generator by resource name in settings.
+        default_id_generator = self.request.registry.id_generators['']
+        resource_name = self.context.resource_name if self.context else ''
+        id_generator = self.request.registry.id_generators.get(resource_name,
+                                                               default_id_generator)
+        return self.default_model(
+            storage=self.request.registry.storage,
+            id_generator=id_generator,
+            collection_id=classname(self),
+            parent_id=parent_id,
+            auth=auth)
 
     def get_parent_id(self, request):
         """Return the parent_id of the resource with regards to the current
@@ -788,6 +800,7 @@ class UserResource(object):
 
         :raises: :class:`pyramid.httpexceptions.HTTPBadRequest`
         """
+        return
         is_string = isinstance(record_id, six.string_types)
         if not is_string or not self.model.id_generator.match(record_id):
             error_details = {
