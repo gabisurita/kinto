@@ -64,7 +64,7 @@ def register_resource(resource_cls, settings=None, viewset=None, depth=1,
 
     resource_name = viewset.get_name(resource_cls)
 
-    def register_service(endpoint_type, settings):
+    def register_service(endpoint_type, config):
         """Registers a service in cornice, for the given type.
         """
         path_pattern = getattr(viewset, '{}_path'.format(endpoint_type))
@@ -86,13 +86,12 @@ def register_resource(resource_cls, settings=None, viewset=None, depth=1,
                                if viewset.record_path is not None else None)
 
         # Get the resource id generators on settings
-        id_generator = (settings.get("{}_id_generator".format(resource_name)) or
-                        settings.get("id_generator"))
+        id_generators = config.registry.id_generators
 
         methods = getattr(viewset, '{}_methods'.format(endpoint_type))
         for method in methods:
-            if not viewset.is_endpoint_enabled(
-                    endpoint_type, resource_name, method.lower(), settings):
+            if not viewset.is_endpoint_enabled(endpoint_type, resource_name,
+                                               method.lower(), config.registry.settings):
                 continue
 
             argument_getter = getattr(viewset, '{}_arguments'.format(endpoint_type))
@@ -102,7 +101,8 @@ def register_resource(resource_cls, settings=None, viewset=None, depth=1,
             # XXX: This can't be bound at viewset because we must have the instance
             # settings available.
             view_args['schema'] = view_args['schema'].bind(path=path,
-                                                           id_generator=id_generator)
+                                                           id_generators=id_generators,
+                                                           resource_name=resource_name)
 
             view = viewset.get_view(endpoint_type, method.lower())
             service.add_view(method, view, klass=resource_cls, **view_args)
@@ -131,11 +131,11 @@ def register_resource(resource_cls, settings=None, viewset=None, depth=1,
             raise pyramid_exceptions.ConfigurationError(msg)
 
         # A service for the list.
-        service = register_service('collection', config.registry.settings)
+        service = register_service('collection', config)
         config.add_cornice_service(service)
         # An optional one for record endpoint.
         if getattr(viewset, 'record_path') is not None:
-            service = register_service('record', config.registry.settings)
+            service = register_service('record', config)
             config.add_cornice_service(service)
 
     info = venusian.attach(resource_cls, callback, category='pyramid', depth=depth)
@@ -333,7 +333,6 @@ class UserResource:
             # data. Must look up in body.
             id_field = self.model.id_field
             new_record[id_field] = _id = self.request.json['data'][id_field]
-            self._raise_400_if_invalid_id(_id)
             existing = self._get_record_or_404(_id)
         except (HTTPNotFound, KeyError, ValueError):
             existing = None

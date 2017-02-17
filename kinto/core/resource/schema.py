@@ -1,6 +1,4 @@
-import pydoc
 import warnings
-import re
 
 import colander
 
@@ -8,7 +6,6 @@ from kinto.core.schema import (Any, HeaderField, QueryField, HeaderQuotedInteger
                                FieldList, TimeStamp, URL)
 from kinto.core.errors import ErrorSchema
 from kinto.core.utils import native_value
-from kinto.core.storage import StorageBase
 
 POSTGRESQL_MAX_INTEGER_VALUE = 2**63
 
@@ -69,6 +66,33 @@ class ResourceSchema(colander.MappingSchema):
         will be accepted on records. Set this to ``False`` in order to limit
         the accepted fields to the ones defined in the schema.
         """
+
+    @colander.deferred
+    def id(node, kwargs):
+        def build_id(node, kwargs):
+            """Build an id node with matching the regex from the id_generator
+            provided on the configuration."""
+
+            id_generators = kwargs.get('id_generators')
+            resource_name = kwargs.get('resource_name')
+
+            # If not provided, keep deferred
+            if not (id_generators and resource_name):
+                return
+
+            # Get id generators
+            id_generator = id_generators.get(resource_name, id_generators[''])
+
+            # Build the corresponding validator and SchemaNode
+            validator = colander.Regex(id_generator.regexp)
+            id = colander.SchemaNode(colander.String(),
+                                     validator=validator,
+                                     missing=colander.drop)
+
+            return id
+
+        # Set if node is provided, else keep deferred (allow bindind later)
+        return build_id(node, kwargs) or colander.deferred(build_id)
 
     @classmethod
     def get_option(cls, attr):
@@ -307,57 +331,6 @@ class RequestSchema(colander.MappingSchema):
     """Base schema for kinto requests."""
 
     @colander.deferred
-    def path(node, kwargs):
-        def build_path(node, kwargs):
-            """Build a path request schema from a cornice path and resource_id
-            generators."""
-            path = kwargs.get('path')
-            # If not defined, keep deferred
-            if not path:
-                return
-
-            # Try to replace {id} with the current resource id
-            current_resource_id = kwargs.get('resource_name')
-            if current_resource_id:
-                path = path.replace('{id}', '{{{}_id}}'.format(current_resource_id))
-
-            # Match all ids and remove brackets
-            resource_ids = [name[1:-1] for name in re.findall('\{.*?\}', path)]
-
-            # Get id generators
-            id_generators = kwargs.get('id_generators', [])
-
-            path_schema = colander.MappingSchema(name='path')
-
-            # build a path request schema node for each resource
-            for rid in resource_ids:
-                # try to get a config setted id_generator for the resource
-                try:
-                    resource_id_gen = id_generators.get('{}_generator'.format(rid))
-                    default_id_gen = id_generators.get('id_generator')
-                    id_gen = resource_id_gen or default_id_gen
-                    id_gen = pydoc.locate(id_gen)
-                    regexp = id_gen.regexp
-
-                # Get the basic storage generator
-                except AttributeError:
-                    regexp = StorageBase.id_generator.regexp
-
-                # Reset the current resource id
-                if rid == "{}_id".format(current_resource_id or ""):
-                    rid = 'id'
-
-                # Build the corresponding validator and SchemaNode
-                validator = colander.Regex(regexp, msg="")
-                path_schema[rid] = colander.SchemaNode(colander.String(),
-                                                       validator=validator)
-
-            return path_schema
-
-        # Set if node is provided, else keep deferred (allow bindind later)
-        return build_path(node, kwargs) or colander.deferred(build_path)
-
-    @colander.deferred
     def header(node, kwargs):
         return kwargs.get('header')
 
@@ -372,12 +345,6 @@ class RequestSchema(colander.MappingSchema):
         if not self.get('querystring'):
             self['querystring'] = QuerySchema()
 
-    def deserialize(self, cstruct=colander.null):
-        print(cstruct)
-        deserialized = super().deserialize(cstruct)
-        print(deserialized)
-        return deserialized
-
 
 class PayloadRequestSchema(RequestSchema):
     """Base schema for methods that use a JSON request body."""
@@ -388,6 +355,12 @@ class PayloadRequestSchema(RequestSchema):
             return kwargs.get('body')
         # Set if node is provided, else keep deferred (and allow bindind later)
         return get_body(node, kwargs) or colander.deferred(get_body)
+
+    def deserialize(self, cstruct=colander.null):
+        print(cstruct)
+        deserialized = super().deserialize(cstruct)
+        print(deserialized)
+        return deserialized
 
 
 class JsonPatchRequestSchema(RequestSchema):
