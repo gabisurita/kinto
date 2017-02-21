@@ -18,6 +18,7 @@ pyparsing==2.1.10
 pyramid==1.8.2
 pyramid-multiauth==0.9.0
 pyramid-tm==1.1.1
+pyramid_swagger==2.3.0
 python-dateutil==2.6.0
 raven==6.0.0
 repoze.lru==0.6

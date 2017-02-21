@@ -1,3 +1,7 @@
+import mock
+import pyramid_swagger
+from bravado_core.spec import Spec
+from cornice.service import get_services
 from cornice_swagger import CorniceSwagger
 from cornice_swagger.converters.schema import TypeConverter
 
@@ -114,3 +118,19 @@ class OpenAPI(CorniceSwagger):
             return []
         else:
             return [{name: list(roles)} for name, roles in self.security_roles.items()]
+
+
+def includeme(config):
+
+    request = mock.MagicMock()
+    request.registry.settings = config.registry.settings
+    request.host = 'localhost'
+
+    # XXX: Pyramid swgger dont support load from URL,
+    # but we can directly overwrite the load method
+    def load(_):
+        spec = OpenAPI(get_services(), request).generate()
+        return Spec.from_dict(spec)
+
+    pyramid_swagger.get_swagger_spec = load
+    config.include('pyramid_swagger')

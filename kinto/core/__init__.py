@@ -89,7 +89,11 @@ DEFAULT_SETTINGS = {
                                        'BasicAuthAuthenticationPolicy'),
     'multiauth.authorization_policy': ('kinto.core.authorization.'
                                        'AuthorizationPolicy'),
-    'swagger_file': 'swagger.yaml',
+    'pyramid_swagger.swagger_versions': ['2.0'],
+    'pyramid_swagger.enable_api_doc_views': False,
+    'pyramid_swagger.enable_path_validation': False,
+    'pyramid_swagger.enable_request_validation': False,  # Trust cornice
+    'pyramid_swagger.enable_swagger_spec_validation': True
 }
 
 
@@ -180,6 +184,8 @@ def includeme(config):
 
     # Scan views.
     config.scan("kinto.core.views")
+
+    config.include("kinto.core.api")
 
     # Give sign of life.
     msg = "Running {project_name} {project_version}."

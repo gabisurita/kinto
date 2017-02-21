@@ -26,6 +26,7 @@ REQUIREMENTS = [
     'python-dateutil',
     'pyramid > 1.8',
     'pyramid_multiauth >= 0.8',  # User on policy selected event.
+    'pyramid_swagger',
     'transaction',
     'pyramid_tm',
     'requests',
